@@ -7,8 +7,12 @@
 2. Settings → Pages → Branch를 main / (root)로 두고 저장합니다.
 3. 잠시 뒤 `https://아이디.github.io/저장소이름/` 에서 열립니다.
 
+## 저작권
+© 2026 영쌤클래스. 교육용으로 제작. 무단 복제·재배포 금지.
+
 ## 사용 준비
 - Google AI Studio(https://aistudio.google.com/app/apikey)에서 Gemini API 키를 발급받아, 앱 오른쪽 위 「API 키 설정」에 넣습니다. 키는 사용자의 브라우저에만 저장됩니다.
+- 같은 창의 「이 키로 쓸 수 있는 모델 불러오기」를 누르면 현재 계정에서 쓸 수 있는 Gemini 모델 목록이 나옵니다. 새 모델이 나와도 앱을 고칠 필요 없이 고르면 됩니다.
 
 ## 데이터
 - data/standards.json — 초·중·고 성취기준 2,217개와 성취수준(초 A~C, 중·고 A~E)

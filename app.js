@@ -1,4 +1,5 @@
 /* 개념 한 걸음 — app.js
+   © 2026 영쌤클래스. 교육용으로 제작. 무단 복제·재배포 금지.
    데이터: data/standards.json (2022 개정 성취기준·성취수준), data/core_ideas.json (공통교육과정 핵심아이디어)
    AI: 교사 본인의 Gemini API 키를 브라우저에 저장해 직접 호출 */
 
@@ -186,7 +187,31 @@ function lowestLevelKey(std) { for (const k of ['E', 'D', 'C', 'B', 'A']) if (st
 
 /* ---------- Gemini ---------- */
 function getKey() { return localStorage.getItem('chg:key') || ''; }
-function getModel() { return localStorage.getItem('chg:model') || 'gemini-2.5-flash'; }
+const DEFAULT_MODELS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+function getModel() { return localStorage.getItem('chg:model') || DEFAULT_MODELS[0]; }
+function fillModels(list, note) {
+  const sel = $('#selModel'); const cur = getModel();
+  const items = uniq([...(list || []), ...(list && list.length ? [] : DEFAULT_MODELS), cur]);
+  fillSelect(sel, items);
+  sel.value = cur;
+  if (note) $('#modelNote').textContent = note;
+}
+async function loadModels() {
+  const key = $('#inpKey').value.trim() || getKey();
+  if (!key) { $('#modelNote').textContent = '키를 먼저 입력하세요.'; return; }
+  $('#modelNote').textContent = '불러오는 중…';
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    const names = (j.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace(/^models\//, ''))
+      .filter(n => /^gemini/.test(n) && !/(image|tts|live|audio|embedding|translate|transcribe|omni|native)/.test(n))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    fillModels(names, `${names.length}개 모델을 찾았습니다.`);
+  } catch (e) { fillModels(null, '목록을 불러오지 못했습니다. 키를 확인하거나 직접 입력하세요.'); }
+}
 async function callGemini(prompt) {
   const key = getKey();
   if (!key) { $('#dlgSettings').showModal(); throw new Error('API 키를 먼저 저장해 주세요.'); }
@@ -263,15 +288,16 @@ ${curriculumBlock()}
 
 과제: 위 성취기준을 다루는 여러 차시에 걸쳐 교사가 교탁에 두고 쓸 "오개념·발문 지도"를 만들어라.
 1. 개념을 학생 언어로 된 한 문장 정의와 교과 정의로 정리하고, 선택된 핵심아이디어와 어떻게 이어지는지 한 문장으로 쓴다.
-2. 예상 오개념 3개. 각 오개념은 (가) 학생이 실제로 말할 법한 문장, (나) 원인 유형(선개념 / 과잉일반화 / 과소일반화 / 용어 혼동 중 하나), (다) 근거: 성취수준 최하 수준 서술의 어느 부분에서 이 막힘이 예측되는지 해당 구절을 짧게 인용하며 설명, (라) 이 오개념을 드러내는 진단 질문 1개, (마) 교정 발문 유형(반례 제시형 / 모순 유도형 / 근거 요구형 중 원인 유형에 가장 맞는 것)과 실제 발문 1문장, (바) 교정 뒤 이해를 확인하는 짧은 질문 1개.
+2. 예상 오개념 3개. 각 오개념은 (가) 학생이 실제로 말할 법한 문장, (나) 원인 유형(선개념 / 과잉일반화 / 과소일반화 / 용어 혼동 중 하나), (다) 근거: 성취수준 최하 수준 서술의 어느 부분에서 이 막힘이 예측되는지 해당 구절을 짧게 인용하며 설명, (라) 이 오개념을 드러내는 진단 질문 1개, (마) 교정 발문 유형(반례 제시형 / 모순 유도형 / 근거 요구형 중 원인 유형에 가장 맞는 것)과 실제 발문 1문장, (바) 교정 뒤 이해를 확인하는 짧은 질문 1개, (사) 이 발문을 던질 수업 장면 1문장: 어느 차시의 어떤 활동 중(예: 도입에서 전체에게 / 모둠 활동 중 순회하며 이 말을 한 학생에게 / 정리 단계 / 평가 후 재지도)에, 어떤 자료를 보여 주며 묻는지.
+   - 세 오개념의 근거는 서로 다른 구절이나 다른 관점을 짚어야 한다. 같은 구절을 세 번 반복 인용하지 말 것. 성취수준 서술이 짧아 근거가 부족하면 성취기준 문장의 핵심 동사와 핵심아이디어에서 근거를 찾는다.
    - 반례 제시형: 오개념에 어긋나는 사례를 보여 주고 묻는다. 과잉일반화에 특히 맞는다.
    - 모순 유도형: 학생의 말대로라면 생기는 모순을 스스로 발견하게 묻는다. 선개념에 특히 맞는다.
    - 근거 요구형: "왜 그렇게 생각했는지"를 묻고 근거를 점검하게 한다. 용어 혼동·과소일반화에 맞는다.
-3. 발문 카드 활용 안내 2~3문장: 도입 차시, 연습 중 순회지도, 평가 후 재지도에서 어떻게 쓰는지.
+3. 이 발문 카드를 수업에서 쓰는 방법 3문장: ① 도입 차시 첫 5분에 진단 질문으로 학생 생각을 드러내는 법, ② 활동 중 순회하며 오개념이 들리는 순간 교정 발문을 던지는 법, ③ 정리·평가 후 확인 질문으로 재지도하는 법. 이 성취기준의 실제 활동에 맞게 구체적으로.
 
 JSON 형식:
 {"concept":{"name":"${state.concept}","student_definition":"","formal_definition":"","core_idea_link":""},
- "misconceptions":[{"statement":"","type":"","evidence":"","diagnostic_question":"","correction_type":"","correction_question":"","follow_up":""}],
+ "misconceptions":[{"statement":"","type":"","evidence":"","diagnostic_question":"","correction_type":"","correction_question":"","follow_up":"","scene":""}],
  "teaching_note":""}`;
 }
 
@@ -399,6 +425,7 @@ function renderMap() {
         <div class="mis-row"><span class="mis-tag">${ed(p + '.correction_type')}</span>
           <div class="mis-q editable" contenteditable="true" data-bind="${p}.correction_question"></div></div>
         <div class="mis-small"><b>확인</b> ${ed(p + '.follow_up')}</div>
+        <div class="mis-scene"><b>쓰는 장면</b> ${ed(p + '.scene')}</div>
       </div>`;
     box.appendChild(card);
   });
@@ -442,8 +469,9 @@ function toMarkdown() {
       out.push(`- 진단 질문: ${x.diagnostic_question}`);
       out.push(`- 교정 발문 (${x.correction_type}): ${x.correction_question}`);
       out.push(`- 확인: ${x.follow_up}`);
+      if (x.scene) out.push(`- 쓰는 장면: ${x.scene}`);
     });
-    out.push('', `발문 카드 활용: ${m.teaching_note || ''}`);
+    out.push('', `수업에서 쓰는 방법: ${m.teaching_note || ''}`);
   }
   if (L) {
     out.push('', '## 귀납적 개념 획득 차시안');
@@ -561,8 +589,14 @@ async function init() {
   $('#btnSave').addEventListener('click', saveCurrent);
 
   // 설정
-  $('#btnSettings').addEventListener('click', () => { $('#inpKey').value = getKey(); $('#selModel').value = getModel(); $('#dlgSettings').showModal(); });
-  $('#btnSaveKey').addEventListener('click', () => { localStorage.setItem('chg:key', $('#inpKey').value.trim()); localStorage.setItem('chg:model', $('#selModel').value); setStatus('API 키를 저장했습니다.'); });
+  $('#btnSettings').addEventListener('click', () => { $('#inpKey').value = getKey(); fillModels(null, ''); $('#inpModel').value = ''; $('#dlgSettings').showModal(); });
+  $('#btnModels').addEventListener('click', loadModels);
+  $('#btnSaveKey').addEventListener('click', () => {
+    localStorage.setItem('chg:key', $('#inpKey').value.trim());
+    const custom = $('#inpModel').value.trim();
+    localStorage.setItem('chg:model', custom || $('#selModel').value);
+    setStatus(`저장했습니다. 모델: ${getModel()}`);
+  });
   // 저장 목록
   $('#btnSaved').addEventListener('click', () => { renderSaved(); $('#dlgSaved').showModal(); });
   $('#btnCloseSaved').addEventListener('click', () => $('#dlgSaved').close());

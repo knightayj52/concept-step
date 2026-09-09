@@ -1,7 +1,14 @@
 <!DOCTYPE html>
+<!--
+  개념 한 걸음 — 성취기준으로 만드는 오개념·발문 지도
+  © 2026 영쌤클래스. All rights reserved.
+  본 앱은 교육용으로 제작되었습니다. 저작자의 허락 없는 무단 복제·수정·재배포를 금지합니다.
+-->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="author" content="영쌤클래스">
+<meta name="copyright" content="© 2026 영쌤클래스. 교육용. 무단 복제·재배포 금지">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>개념 한 걸음 — 성취기준으로 만드는 오개념·발문 지도</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -138,7 +145,7 @@
         <div class="block-head"><h3>예상 오개념과 교정 발문</h3><span class="head-note">성취수준 하위 서술을 출발점으로 예측했습니다. 우리 반에서 실제로 나온 오개념으로 고쳐 쓰세요.</span></div>
         <div id="misCards" class="mis-cards"></div>
         <div class="teaching-note">
-          <span class="def-label">발문 카드 활용</span>
+          <span class="def-label">이 발문 카드를 수업에서 쓰는 방법</span>
           <p class="editable" contenteditable="true" data-bind="map.teaching_note"></p>
         </div>
       </section>
@@ -188,6 +195,8 @@
   </section>
 </main>
 
+<footer class="foot">© 2026 영쌤클래스 · 교육용으로 제작 · 무단 복제·재배포 금지 · 자료: 2022 개정 교육과정 성취기준·성취수준·핵심아이디어</footer>
+
 <!-- 설정 -->
 <dialog id="dlgSettings">
   <form method="dialog">
@@ -195,12 +204,16 @@
     <p class="dlg-p">키는 이 브라우저에만 저장되고 서버로 보내지 않습니다. <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio에서 무료로 발급</a>받을 수 있습니다.</p>
     <label>API 키 <input id="inpKey" type="password" autocomplete="off" placeholder="AIza…"></label>
     <label>모델
-      <select id="selModel">
-        <option value="gemini-2.5-flash">gemini-2.5-flash (빠름, 권장)</option>
-        <option value="gemini-2.5-pro">gemini-2.5-pro (느리지만 정교)</option>
-        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-      </select>
+      <select id="selModel"></select>
     </label>
+    <div class="model-row">
+      <button id="btnModels" class="ghost" type="button">이 키로 쓸 수 있는 모델 불러오기</button>
+      <span id="modelNote" class="note"></span>
+    </div>
+    <label>직접 입력 (목록에 없을 때)
+      <input id="inpModel" type="text" placeholder="예: gemini-3.5-flash">
+    </label>
+    <p class="dlg-p">Flash 계열은 빠르고 무료 할당량이 넉넉합니다. Pro 계열은 오개념 근거가 더 정교한 대신 느리고 할당량이 적습니다. 같은 성취기준으로 두 모델을 비교해 보고 정하세요.</p>
     <div class="dlg-actions">
       <button value="cancel" class="ghost" type="submit">닫기</button>
       <button id="btnSaveKey" value="ok" class="primary" type="submit">저장</button>

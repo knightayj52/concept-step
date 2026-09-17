@@ -22,6 +22,8 @@ const state = {
   context: '',
   map: null,           // 오개념·발문 지도
   lesson: null,        // 차시안
+  lessonMode: 'inductive',
+  review: { checks: [false,false,false,false], edits: '' },
 };
 
 /* ---------- 유틸 ---------- */
@@ -266,7 +268,8 @@ function curriculumBlock() {
   return lines.join('\n');
 }
 
-const RULES = `너는 한국 교사의 수업 준비를 돕는 교육과정 전문가다. 반드시 아래 교육과정 원문 범위 안에서만 생성하고, 학년 수준에 맞는 어휘를 쓴다. 학생이 실제로 말할 법한 구어체를 쓰고, 교사 발문은 한 문장으로 짧게, 학생이 생각하게 만드는 열린 질문으로 쓴다. 출력은 JSON만, 다른 텍스트 없이.`;
+const RULES = `너는 한국 교사의 수업 준비를 돕는 교육과정 전문가다. 반드시 아래 교육과정 원문 범위 안에서만 생성하고, 학년 수준에 맞는 어휘를 쓴다. 학생이 실제로 말할 법한 구어체를 쓰고, 교사 발문은 한 문장으로 짧게, 학생이 생각하게 만드는 열린 질문으로 쓴다. 출력은 JSON만, 다른 텍스트 없이.
+발문의 조건: ① 한 문장 ② 예/아니오로 끝나지 않는 열린 질문 ③ 학생이 판단하게 하고 교사가 판정하지 않는다 ④ 정답이나 정의를 미리 말하지 않는다 ⑤ 학생이 지금 보고 있는 하나의 상황 안에서 묻는다 — 전체가 둘인 것처럼 들리거나 학년 범위 밖의 개념(예: 분수의 상대성)을 끌어들이지 않는다.`;
 
 function promptSuggest() {
   return `${RULES}
@@ -287,8 +290,10 @@ ${curriculumBlock()}
 [핵심 개념] ${state.concept}
 
 과제: 위 성취기준을 다루는 여러 차시에 걸쳐 교사가 교탁에 두고 쓸 "오개념·발문 지도"를 만들어라.
+0. 도입 방식 판단(approach): 이 개념을 처음 가르칠 때 "귀납(사례에서 발견)" / "연역 후 범례(정의·약속을 안내한 뒤 여러 사례로 확인)" / "먼저 씨름 후 설명" 중 무엇이 맞는지 mode로 고르고, 이유를 2문장으로. 기준: 학생 경험에 붙어 있고 사례만 있으면 규칙이 보이며 오개념이 흔한 개념은 귀납. 약속·기호·용어·역사적 사실·의도처럼 자료 없이는 상상밖에 못 하는 것, 절차·안전은 연역 후 범례. 사전지식이 어느 정도 있고 개념적 이해가 목표이면 먼저 씨름 후 설명.
 1. 개념을 학생 언어로 된 한 문장 정의와 교과 정의로 정리하고, 선택된 핵심아이디어와 어떻게 이어지는지 한 문장으로 쓴다.
 2. 예상 오개념 3개. 각 오개념은 (가) 학생이 실제로 말할 법한 문장, (나) 원인 유형(선개념 / 과잉일반화 / 과소일반화 / 용어 혼동 중 하나), (다) 근거: 성취수준 최하 수준 서술의 어느 부분에서 이 막힘이 예측되는지 해당 구절을 짧게 인용하며 설명, (라) 이 오개념을 드러내는 진단 질문 1개, (마) 교정 발문 유형(반례 제시형 / 모순 유도형 / 근거 요구형 중 원인 유형에 가장 맞는 것)과 실제 발문 1문장, (바) 교정 뒤 이해를 확인하는 짧은 질문 1개, (사) 이 발문을 던질 수업 장면 1문장: 어느 차시의 어떤 활동 중(예: 도입에서 전체에게 / 모둠 활동 중 순회하며 이 말을 한 학생에게 / 정리 단계 / 평가 후 재지도)에, 어떤 자료를 보여 주며 묻는지.
+   (아) 발문 트리: 교정 발문을 던진 뒤 학생이 보일 예상 반응 3갈래 — kind는 "이해" / "부분 이해" / "오개념 유지" — 각각 학생이 실제로 할 법한 말 1문장과, 그 반응에 교사가 이어서 던질 다음 발문 1문장. "이해"에는 확장·적용 질문을, "부분 이해"에는 빠진 속성을 짚는 질문을, "오개념 유지"에는 더 강한 반례나 더 구체적인 상황을 주는 질문을. (자) 판단 기준: 어떤 말이 나오면 이 오개념을 벗어난 것으로 볼지 1문장.
    - 세 오개념의 근거는 서로 다른 구절이나 다른 관점을 짚어야 한다. 같은 구절을 세 번 반복 인용하지 말 것. 성취수준 서술이 짧아 근거가 부족하면 성취기준 문장의 핵심 동사와 핵심아이디어에서 근거를 찾는다.
    - 반례 제시형: 오개념에 어긋나는 사례를 보여 주고 묻는다. 과잉일반화에 특히 맞는다.
    - 모순 유도형: 학생의 말대로라면 생기는 모순을 스스로 발견하게 묻는다. 선개념에 특히 맞는다.
@@ -296,8 +301,9 @@ ${curriculumBlock()}
 3. 이 발문 카드를 수업에서 쓰는 방법 3문장: ① 도입 차시 첫 5분에 진단 질문으로 학생 생각을 드러내는 법, ② 활동 중 순회하며 오개념이 들리는 순간 교정 발문을 던지는 법, ③ 정리·평가 후 확인 질문으로 재지도하는 법. 이 성취기준의 실제 활동에 맞게 구체적으로.
 
 JSON 형식:
-{"concept":{"name":"${state.concept}","student_definition":"","formal_definition":"","core_idea_link":""},
- "misconceptions":[{"statement":"","type":"","evidence":"","diagnostic_question":"","correction_type":"","correction_question":"","follow_up":"","scene":""}],
+{"approach":{"mode":"귀납|연역 후 범례|먼저 씨름 후 설명","reason":""},
+ "concept":{"name":"${state.concept}","student_definition":"","formal_definition":"","core_idea_link":""},
+ "misconceptions":[{"statement":"","type":"","evidence":"","diagnostic_question":"","correction_type":"","correction_question":"","follow_up":"","scene":"","responses":[{"kind":"이해","student_says":"","next_question":""},{"kind":"부분 이해","student_says":"","next_question":""},{"kind":"오개념 유지","student_says":"","next_question":""}],"mastery":""}],
  "teaching_note":""}`;
 }
 
@@ -312,7 +318,9 @@ ${curriculumBlock()}
 [이미 예측한 오개념]
 ${mis}
 
-과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "귀납적 개념 획득" 방식으로 설계하라. 학생은 예시와 비예시를 먼저 보고, 공통 특징을 스스로 찾고, 자기 말로 정의를 만든 뒤, 마지막에 교과 정의와 맞춘다. 정의를 먼저 알려주지 않는다.
+${state.lessonMode === 'deductive'
+  ? `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "연역 안내 후 범례 확인" 방식으로 설계하라. 교사가 정의·약속·핵심 자료를 짧고 분명하게 안내한 뒤(학생 말로 번역해 주기), 학생은 여러 예시와 가까운 비예시에 그 정의를 적용해 판단하고, 판단이 갈리는 사례에서 속성을 다시 확인하며, 마지막에 자기 말로 정의를 다시 쓴다. 안내는 5분 안에 끝내고 나머지는 학생의 적용·판단 활동으로 채운다.`
+  : `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "귀납적 개념 획득" 방식으로 설계하라. 학생은 예시와 비예시를 먼저 보고, 공통 특징을 스스로 찾고, 자기 말로 정의를 만든 뒤, 마지막에 교과 정의와 맞춘다. 정의를 먼저 알려주지 않는다.`}
 1. 예시 5개: 학생에게 친숙하고 개념의 필수 속성이 잘 드러나는 것. 각각 왜 예시인지 한 구절.
 2. 비예시 5개: "가까운 비예시" 위주 — 위에 예측한 오개념을 가진 학생이 예시라고 착각할 만한 것. 각각 어떤 속성이 빠져서 비예시인지 한 구절.
 3. 학생이 발견해야 할 필수 속성 3~4개와, 각각을 끌어내는 교사 질문 1문장.
@@ -365,6 +373,7 @@ async function generateMap() {
   try {
     state.map = await callGemini(promptMap());
     state.lesson = null; $('#blkLesson').classList.add('hidden'); $('#btnPresent').disabled = true;
+    state.review = { checks: [false,false,false,false], edits: '' };
     renderMap();
     $('#result').classList.remove('hidden');
     $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -373,10 +382,11 @@ async function generateMap() {
   finally { $('#btnGenerate').disabled = false; }
 }
 
-async function generateLesson() {
+async function generateLesson(mode) {
   if (!state.map) return;
+  if (mode) state.lessonMode = mode;
   setStatus('차시안을 만드는 중 (20초 안팎)', 'busy');
-  $('#btnLesson').disabled = true;
+  $('#btnLesson').disabled = true; $('#btnLessonDed').disabled = true;
   try {
     state.lesson = await callGemini(promptLesson());
     renderLesson();
@@ -385,7 +395,7 @@ async function generateLesson() {
     $('#blkLesson').scrollIntoView({ behavior: 'smooth', block: 'start' });
     setStatus('차시안 완성.');
   } catch (e) { setStatus(e.message, 'err'); }
-  finally { $('#btnLesson').disabled = false; }
+  finally { $('#btnLesson').disabled = false; $('#btnLessonDed').disabled = false; }
 }
 
 /* ---------- 렌더 & 양방향 바인딩 ---------- */
@@ -407,6 +417,7 @@ function bindAll(root = document) {
 }
 function ed(path, cls = '') { return `<span class="editable ${cls}" contenteditable="true" data-bind="${path}"></span>`; }
 
+function branchClass(k) { return k === '이해' ? 'ok' : (k === '부분 이해' ? 'part' : 'hold'); }
 function renderMap() {
   const m = state.map;
   $('#resTitle').textContent = `${state.concept} — ${state.std.c}`;
@@ -424,18 +435,45 @@ function renderMap() {
         <div class="mis-row"><span class="mis-tag">진단 질문</span><div class="mis-small">${ed(p + '.diagnostic_question', 'serif')}</div></div>
         <div class="mis-row"><span class="mis-tag">${ed(p + '.correction_type')}</span>
           <div class="mis-q editable" contenteditable="true" data-bind="${p}.correction_question"></div></div>
+        <div class="tree">
+          <div class="tree-head">학생 반응에 따라</div>
+          ${(mis.responses || []).map((r, k) => `<div class="branch ${branchClass(r.kind)}">
+            <span class="branch-kind">${ed(p + '.responses.' + k + '.kind')}</span>
+            <div class="branch-says editable" contenteditable="true" data-bind="${p}.responses.${k}.student_says"></div>
+            <div class="branch-next"><span class="arrow">↳</span><div class="editable serif" contenteditable="true" data-bind="${p}.responses.${k}.next_question"></div></div>
+          </div>`).join('')}
+          <div class="mis-small"><b>벗어났다고 보는 기준</b> ${ed(p + '.mastery')}</div>
+        </div>
         <div class="mis-small"><b>확인</b> ${ed(p + '.follow_up')}</div>
         <div class="mis-scene"><b>쓰는 장면</b> ${ed(p + '.scene')}</div>
+        <div class="mis-after">
+          <div class="row"><b>수업 뒤</b>
+            <select data-status="${i}">
+              <option value="">아직 수업 전</option>
+              <option value="seen">실제로 나왔다</option>
+              <option value="unseen">나오지 않았다</option>
+              <option value="other">다른 오개념이 나왔다</option>
+            </select></div>
+          <div class="row" style="align-items:flex-start"><span>메모</span>${ed(p + '.note')}</div>
+        </div>
       </div>`;
+    const sel = card.querySelector('select');
+    sel.value = mis.status || '';
+    card.classList.toggle('seen', sel.value === 'seen');
+    sel.addEventListener('change', () => { mis.status = sel.value; card.classList.toggle('seen', sel.value === 'seen'); });
     box.appendChild(card);
   });
+  // 검토 체크
+  $$('#blkReview input[type=checkbox]').forEach(cb => { cb.checked = !!state.review.checks[+cb.dataset.review]; });
   bindAll();
 }
 
 function renderLesson() {
   const L = state.lesson;
   const lv = levelOf(state.std.g);
-  $('#lessonMin').textContent = `(${lv.minutes}분 기준)`;
+  $('#lessonMin').textContent = `(${lv.minutes}분 기준 · ${state.lessonMode === 'deductive' ? '연역 안내 후 범례 확인' : '귀납적 개념 획득'})`;
+  $('#blkLesson h3').textContent = state.lessonMode === 'deductive' ? '연역 안내 후 범례 확인 차시안' : '귀납적 개념 획득 차시안';
+  $('.lesson-lead').textContent = state.lessonMode === 'deductive' ? '정의·약속을 짧게 안내한 뒤 → 여러 예시와 가까운 비예시에 적용해 판단하고 → 갈리는 사례에서 속성을 확인한 뒤 → 자기 말로 정의를 다시 씁니다.' : '예시와 비예시를 먼저 보고 → 공통 특징을 찾고 → 학생 말로 정의를 만든 뒤 → 교과 정의와 맞춥니다. 정의는 맨 마지막에 나옵니다.';
   const li = (arr, path) => arr.map((_, i) => `<li><div class="item editable" contenteditable="true" data-bind="${path}.${i}.item"></div><div class="why editable" contenteditable="true" data-bind="${path}.${i}.note"></div></li>`).join('');
   $('#exList').innerHTML = li(L.examples || [], 'lesson.examples');
   $('#nonList').innerHTML = li(L.nonexamples || [], 'lesson.nonexamples');
@@ -458,6 +496,7 @@ function toMarkdown() {
   for (const k of ['A', 'B', 'C', 'D', 'E']) if (s[k]) out.push(`- ${k}: ${s[k]}`);
   if (state.coreSelected.length) { out.push('', '## 핵심아이디어'); for (const it of state.coreSelected) out.push(`- (${it.id}) ${it.text}`); }
   if (m) {
+    if (m.approach) out.push('', `## 도입 방식: ${m.approach.mode}`, m.approach.reason || '');
     out.push('', '## 개념');
     out.push(`- 학생 언어로: ${m.concept?.student_definition || ''}`);
     out.push(`- 교과 정의: ${m.concept?.formal_definition || ''}`);
@@ -468,10 +507,16 @@ function toMarkdown() {
       out.push(`- 근거: ${x.evidence}`);
       out.push(`- 진단 질문: ${x.diagnostic_question}`);
       out.push(`- 교정 발문 (${x.correction_type}): ${x.correction_question}`);
+      (x.responses || []).forEach(r => out.push(`  - [${r.kind}] "${r.student_says}" → ${r.next_question}`));
+      if (x.mastery) out.push(`- 벗어났다고 보는 기준: ${x.mastery}`);
       out.push(`- 확인: ${x.follow_up}`);
       if (x.scene) out.push(`- 쓰는 장면: ${x.scene}`);
+      if (x.status) out.push(`- 수업 뒤: ${({seen:'실제로 나왔다',unseen:'나오지 않았다',other:'다른 오개념이 나왔다'})[x.status] || ''}${x.note ? ' — ' + x.note : ''}`);
     });
     out.push('', `수업에서 쓰는 방법: ${m.teaching_note || ''}`);
+    const labels = ['근거가 성취수준에서 왔는가','학생이 정말 이렇게 말하는가','발문 조건에 맞는가','유지 갈래가 첫 발문보다 강한가'];
+    out.push('', '## 검토', ...labels.map((l, i) => `- [${state.review.checks[i] ? 'x' : ' '}] ${l}`));
+    if (state.review.edits) out.push(`- 고친 곳: ${state.review.edits}`);
   }
   if (L) {
     out.push('', '## 귀납적 개념 획득 차시안');
@@ -496,7 +541,7 @@ function saveCurrent() {
   if (!state.map) return;
   const list = savedAll();
   const item = { id: Date.now(), title: `${state.concept} — ${state.std.c}`, ts: new Date().toISOString(),
-    data: { stdCode: state.std.c, stdGrade: state.std.g, coreSelected: state.coreSelected, concept: state.concept, context: state.context, map: state.map, lesson: state.lesson } };
+    data: { stdCode: state.std.c, stdGrade: state.std.g, coreSelected: state.coreSelected, concept: state.concept, context: state.context, map: state.map, lesson: state.lesson, lessonMode: state.lessonMode, review: state.review } };
   list.unshift(item);
   localStorage.setItem('chg:saved', JSON.stringify(list.slice(0, 50)));
   setStatus('이 브라우저에 저장했습니다.');
@@ -516,7 +561,8 @@ function loadItem(item) {
   $$('#evCore input').forEach(cb => { const on = state.coreSelected.some(x => x.id === cb.dataset.id); cb.checked = on; cb.closest('label').classList.toggle('picked', on); });
   state.concept = d.concept; $('#inpConcept').value = d.concept;
   state.context = d.context || ''; $('#inpContext').value = state.context;
-  state.map = d.map; state.lesson = d.lesson;
+  state.map = d.map; state.lesson = d.lesson; state.lessonMode = d.lessonMode || 'inductive';
+  state.review = d.review || { checks: [false,false,false,false], edits: '' };
   renderMap(); $('#result').classList.remove('hidden');
   if (state.lesson) { renderLesson(); $('#blkLesson').classList.remove('hidden'); $('#btnPresent').disabled = false; }
   else { $('#blkLesson').classList.add('hidden'); $('#btnPresent').disabled = true; }
@@ -582,12 +628,16 @@ async function init() {
   $('#btnSuggest').addEventListener('click', suggestConcepts);
   $('#btnGenerate').addEventListener('click', generateMap);
   $('#inpConcept').addEventListener('input', () => { state.concept = $('#inpConcept').value; });
-  $('#btnLesson').addEventListener('click', generateLesson);
-  $$('.regen').forEach(b => b.addEventListener('click', () => b.dataset.part === 'lesson' ? generateLesson() : generateMap()));
+  $('#btnLesson').addEventListener('click', () => generateLesson('inductive'));
+  $('#btnLessonDed').addEventListener('click', () => generateLesson('deductive'));
+  $$('.regen').forEach(b => b.addEventListener('click', () => b.dataset.part === 'lesson' ? generateLesson(state.lessonMode) : generateMap()));
   $('#btnCopy').addEventListener('click', copyText);
   $('#btnPrint').addEventListener('click', () => window.print());
   $('#btnSave').addEventListener('click', saveCurrent);
 
+  $$('#blkReview input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { state.review.checks[+cb.dataset.review] = cb.checked; }));
+  $('#btnHelp').addEventListener('click', () => $('#dlgHelp').showModal());
+  $('#btnCloseHelp').addEventListener('click', () => $('#dlgHelp').close());
   // 설정
   $('#btnSettings').addEventListener('click', () => { $('#inpKey').value = getKey(); fillModels(null, ''); $('#inpModel').value = ''; $('#dlgSettings').showModal(); });
   $('#btnModels').addEventListener('click', loadModels);

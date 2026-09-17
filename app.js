@@ -189,8 +189,13 @@ function lowestLevelKey(std) { for (const k of ['E', 'D', 'C', 'B', 'A']) if (st
 
 /* ---------- Gemini ---------- */
 function getKey() { return localStorage.getItem('chg:key') || ''; }
-const DEFAULT_MODELS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-function getModel() { return localStorage.getItem('chg:model') || DEFAULT_MODELS[0]; }
+const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
+function getModel() {
+  const m = localStorage.getItem('chg:model');
+  // 예전에 저장된 2.x 계열은 사라질 예정이므로 최신 기본값으로 올린다
+  if (!m || /^gemini-2\./.test(m)) { localStorage.setItem('chg:model', DEFAULT_MODELS[0]); return DEFAULT_MODELS[0]; }
+  return m;
+}
 function fillModels(list, note) {
   const sel = $('#selModel'); const cur = getModel();
   const items = uniq([...(list || []), ...(list && list.length ? [] : DEFAULT_MODELS), cur]);

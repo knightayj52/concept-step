@@ -238,3 +238,33 @@ dialog h3{font-size:17px;margin-bottom:8px}
 .lesson-mode{font-size:12.5px; color:var(--ink-2); margin-left:8px; font-weight:400}
 @media (max-width:900px){.review-grid{grid-template-columns:1fr}}
 @media print{.review-grid label{font-size:11px}.mis-after select{border:none}}
+
+.practice-tools{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+.print-card-title{display:none}
+#btnManual{margin-top:8px;width:100%}
+.focus-choice{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:12px}
+.focus-choice input{width:auto;margin:0}
+.focus-card{outline:2px solid var(--moss);outline-offset:2px}
+.evidence-check{font-size:11px;line-height:1.5;background:#fff8e8;border-radius:6px;padding:7px;margin:8px 0}
+#reviewStatus{font-weight:500;color:var(--indigo)}
+@media print{
+  .focus-choice{display:none!important}
+  .focus-card{outline:none}
+  body.print-card .evidence,body.print-card #blkApproach,body.print-card #blkConcept,body.print-card #blkLesson,
+  body.print-card .teaching-note,body.print-card .mis:not(.focus-card),body.print-card #blkReview .hint,
+  body.print-card .foot{display:none!important}
+  body.print-card{font-size:10px}
+  body.print-card .print-card-title{display:block;font-weight:700;font-size:12px;order:-1}
+  body.print-card .result{display:flex;flex-direction:column}
+  body.print-card #blkMis{order:0}
+  body.print-card #blkReview{order:1}
+  body.print-card .mis{display:grid;grid-template-columns:30% 70%;break-inside:auto}
+  body.print-card .mis-student,body.print-card .mis-teacher{padding:10px}
+  body.print-card .mis-statement,body.print-card .mis-q{font-size:13px}
+  body.print-card .branch-next .editable{font-size:11px}
+  body.print-card .mis-small,body.print-card .branch-says,body.print-card .mis-scene{font-size:10px}
+  body.print-card .tree{padding:5px 8px;margin:7px 0}
+  body.print-card .block{padding:9px 0;margin:0}
+  body.print-card .mis-after{display:none}
+  body.print-card .review-grid label{font-size:9px}
+}

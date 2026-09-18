@@ -24,6 +24,9 @@ const state = {
   lesson: null,        // 차시안
   lessonMode: 'inductive',
   review: { checks: [false,false,false,false], edits: '' },
+  originalMap: null,
+  focusCard: 0,
+  cardReviews: {},
 };
 
 /* ---------- 유틸 ---------- */
@@ -60,6 +63,8 @@ function normArea(subj, area) {
   return a;
 }
 function coreGroupsFor(std) {
+  // 이 자료는 초1~중3 공통교육과정 전용이다. 교과 이름이 같아도 고등에 연결하지 않는다.
+  if (std.g === '고등학교') return [];
   const cs = coreSubjectOf(std.s);
   let groups = CORE.filter(c => c.s === cs);
   if (std.s === '역사') groups = groups.filter(c => c.series === '역사');
@@ -108,6 +113,7 @@ function onCourseChange() {
   onAreaChange();
 }
 function onAreaChange() {
+  clearSelection();
   const g = currentGrade(), s = $('#selSubject').value, sub = $('#selCourse').value;
   let a = $('#selArea').value; if (a === '(영역 없음)') a = '';
   const list = STD.filter(d => d.g === g && d.s === s && d.sub === sub && d.a === a);
@@ -117,6 +123,7 @@ function onAreaChange() {
 function onSearch() {
   const q = $('#inpSearch').value.trim();
   if (!q) { onAreaChange(); return; }
+  clearSelection();
   const g = currentGrade();
   const list = STD.filter(d => d.g === g && (d.t.includes(q) || d.c.includes(q) || d.a.includes(q))).slice(0, 80);
   fillSelect($('#selStd'), list.map(d => ({ value: d.c, label: `${d.c} ${d.t}` })));
@@ -128,8 +135,16 @@ function onStdPick() {
   state.std = std;
   state.concept = ''; $('#inpConcept').value = ''; $('#conceptChips').innerHTML = '';
   state.map = null; state.lesson = null;
+  state.originalMap = null; state.focusCard = 0;
+  state.cardReviews = {};
+  state.review = { checks: [false,false,false,false], edits: '', plan: '' };
   $('#result').classList.add('hidden');
   renderEvidence();
+}
+function clearSelection() {
+  state.std = null; state.map = null; state.lesson = null; state.originalMap = null;
+  $('#evidence').classList.add('hidden'); $('#result').classList.add('hidden');
+  $('#empty').classList.remove('hidden');
 }
 
 /* ---------- 근거 패널 ---------- */
@@ -141,7 +156,8 @@ function renderEvidence() {
   $('#evMeta').textContent = [std.g, std.s !== std.sub ? `${std.s} · ${std.sub}` : std.s, std.a].filter(Boolean).join(' / ');
   $('#evText').textContent = std.t;
   const dl = $('#evLevels'); dl.innerHTML = '';
-  const names = { A: 'A (상)', B: 'B (중)', C: 'C (하)', D: 'D', E: 'E' };
+  const names = std.D || std.E ? { A: 'A', B: 'B', C: 'C', D: 'D', E: 'E' }
+    : { A: 'A (상)', B: 'B (중)', C: 'C (하)' };
   for (const k of ['A', 'B', 'C', 'D', 'E']) {
     if (!std[k]) continue;
     const dt = document.createElement('dt'); dt.textContent = names[k];
@@ -191,16 +207,13 @@ function lowestLevelKey(std) { for (const k of ['E', 'D', 'C', 'B', 'A']) if (st
 function getKey() { return localStorage.getItem('chg:key') || ''; }
 const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
 function getModel() {
-  const m = localStorage.getItem('chg:model');
-  // 예전에 저장된 2.x 계열은 사라질 예정이므로 최신 기본값으로 올린다
-  if (!m || /^gemini-2\./.test(m)) { localStorage.setItem('chg:model', DEFAULT_MODELS[0]); return DEFAULT_MODELS[0]; }
-  return m;
+  return localStorage.getItem('chg:model') || DEFAULT_MODELS[0];
 }
 function fillModels(list, note) {
   const sel = $('#selModel'); const cur = getModel();
   const items = uniq([...(list || []), ...(list && list.length ? [] : DEFAULT_MODELS), cur]);
   fillSelect(sel, items);
-  sel.value = cur;
+  sel.value = list?.length && !list.includes(cur) ? list[0] : cur;
   if (note) $('#modelNote').textContent = note;
 }
 async function loadModels() {
@@ -208,7 +221,7 @@ async function loadModels() {
   if (!key) { $('#modelNote').textContent = '키를 먼저 입력하세요.'; return; }
   $('#modelNote').textContent = '불러오는 중…';
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(20000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     const names = (j.models || [])
@@ -222,20 +235,27 @@ async function loadModels() {
 async function callGemini(prompt) {
   const key = getKey();
   if (!key) { $('#dlgSettings').showModal(); throw new Error('API 키를 먼저 저장해 주세요.'); }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${getModel()}:generateContent?key=${encodeURIComponent(key)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(getModel())}:generateContent`;
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.7, responseMimeType: 'application/json', maxOutputTokens: 8192 },
   };
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+  } catch (e) {
+    throw new Error(e.name === 'TimeoutError' ? '60초 안에 응답이 오지 않았습니다. 현재 초안은 유지됩니다. 키 없이 연습 또는 직접 작성으로 계속할 수 있습니다.' : '연결하지 못했습니다. 네트워크를 확인하거나 키 없이 연습·직접 작성을 이용하세요.');
+  }
   if (!res.ok) {
     let msg = `요청 실패 (${res.status})`;
     try { const j = await res.json(); msg += ': ' + (j.error?.message || ''); } catch (_) { }
     if (res.status === 400 || res.status === 403) msg += ' — API 키가 맞는지 확인하세요.';
-    if (res.status === 429) msg += ' — 무료 할당량을 잠시 넘었습니다. 조금 뒤 다시 시도하세요.';
+    if (res.status === 404) msg += ' — 설정에서 이 키로 쓸 수 있는 모델 목록을 다시 불러와 선택하세요.';
+    if (res.status === 429) msg += ' — 요청 한도 또는 할당량을 확인하세요. 키 없이 연습·직접 작성으로 계속할 수 있습니다.';
     throw new Error(msg);
   }
   const data = await res.json();
+  if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error('응답이 길어 중간에 끝났습니다. 기존 초안은 유지됩니다. 개념 범위를 좁혀 다시 시도하세요.');
   const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
   const clean = text.replace(/^```json\s*|```\s*$/g, '').trim();
   try { return JSON.parse(clean); }
@@ -256,7 +276,7 @@ function curriculumBlock() {
   lines.push(`[성취수준]`);
   for (const k of ['A', 'B', 'C', 'D', 'E']) if (std[k]) lines.push(`  ${k}: ${std[k]}`);
   const lowest = lowestLevelKey(std);
-  lines.push(`  ※ 최하 수준(${lowest}) 서술은 "학생이 어디까지만 할 수 있는가"를 보여 주므로, 오개념·막힘 지점을 예측하는 출발점으로 삼는다.`);
+  lines.push(`  ※ ${lowest} 수준을 포함한 성취수준은 수행의 도달 정도를 서술하며, 오개념의 발생·원인·빈도를 입증하지 않는다. 전체 수준 간 차이와 성취기준을 비교하여 확인할 개념 요소를 찾고, 예상 오개념은 미검증 가설로 구분한다. 서술에 없는 능력을 없다고 단정하지 않는다.`);
   if (state.coreSelected.length) {
     lines.push(`[핵심아이디어(교사가 선택)]`);
     for (const it of state.coreSelected) lines.push(`  (${it.id}) ${it.text}`);
@@ -273,8 +293,9 @@ function curriculumBlock() {
   return lines.join('\n');
 }
 
-const RULES = `너는 한국 교사의 수업 준비를 돕는 교육과정 전문가다. 반드시 아래 교육과정 원문 범위 안에서만 생성하고, 학년 수준에 맞는 어휘를 쓴다. 학생이 실제로 말할 법한 구어체를 쓰고, 교사 발문은 한 문장으로 짧게, 학생이 생각하게 만드는 열린 질문으로 쓴다. 출력은 JSON만, 다른 텍스트 없이.
-발문의 조건: ① 한 문장 ② 예/아니오로 끝나지 않는 열린 질문 ③ 학생이 판단하게 하고 교사가 판정하지 않는다 ④ 정답이나 정의를 미리 말하지 않는다 ⑤ 학생이 지금 보고 있는 하나의 상황 안에서 묻는다 — 전체가 둘인 것처럼 들리거나 학년 범위 밖의 개념(예: 분수의 상대성)을 끌어들이지 않는다.`;
+const RULES = `너는 한국 교사의 수업 준비를 돕는다. 교육과정 원문과 교수학적 추론을 구분하고, 학년·교과의 정확성을 우선한다. 예상 오개념은 학생 진단 결과가 아니다. 출력은 JSON만 쓴다.
+발문은 한 번에 한 판단을 요구하고 판단 이유를 드러내게 한다. 선택형·예/아니오 질문도 이유 설명과 결합하면 가능하다. 자료와 조건은 별도 안내 문장으로 제시한다. 정답을 암시하는 유도 질문을 피하되 필요한 정의·용어·명시적 설명을 금지하지 않는다. 탐구에서는 안내를 제공하며 정의의 제시 시점은 목표·사전지식·과제에 따라 정한다.
+원인 유형은 배타적 진단 분류가 아니다. 선개념/과잉일반화/과소일반화/용어 혼동을 중복 표기할 수 있고, 선수지식 부족/절차 오류/자료 해석/판단 보류도 가능하다. 오답 한 문장만으로 원인을 확정하지 않는다. 근거 요구는 모든 유형에 가능하며, 반례·대조·재표현·명시적 설명을 학생 반응에 따라 조합한다.`;
 
 function promptSuggest() {
   return `${RULES}
@@ -293,23 +314,23 @@ function promptMap() {
 ${curriculumBlock()}
 
 [핵심 개념] ${state.concept}
-
-과제: 위 성취기준을 다루는 여러 차시에 걸쳐 교사가 교탁에 두고 쓸 "오개념·발문 지도"를 만들어라.
-0. 도입 방식 판단(approach): 이 개념을 처음 가르칠 때 "귀납(사례에서 발견)" / "연역 후 범례(정의·약속을 안내한 뒤 여러 사례로 확인)" / "먼저 씨름 후 설명" 중 무엇이 맞는지 mode로 고르고, 이유를 2문장으로. 기준: 학생 경험에 붙어 있고 사례만 있으면 규칙이 보이며 오개념이 흔한 개념은 귀납. 약속·기호·용어·역사적 사실·의도처럼 자료 없이는 상상밖에 못 하는 것, 절차·안전은 연역 후 범례. 사전지식이 어느 정도 있고 개념적 이해가 목표이면 먼저 씨름 후 설명.
-1. 개념을 학생 언어로 된 한 문장 정의와 교과 정의로 정리하고, 선택된 핵심아이디어와 어떻게 이어지는지 한 문장으로 쓴다.
-2. 예상 오개념 3개. 각 오개념은 (가) 학생이 실제로 말할 법한 문장, (나) 원인 유형(선개념 / 과잉일반화 / 과소일반화 / 용어 혼동 중 하나), (다) 근거: 성취수준 최하 수준 서술의 어느 부분에서 이 막힘이 예측되는지 해당 구절을 짧게 인용하며 설명, (라) 이 오개념을 드러내는 진단 질문 1개, (마) 교정 발문 유형(반례 제시형 / 모순 유도형 / 근거 요구형 중 원인 유형에 가장 맞는 것)과 실제 발문 1문장, (바) 교정 뒤 이해를 확인하는 짧은 질문 1개, (사) 이 발문을 던질 수업 장면 1문장: 어느 차시의 어떤 활동 중(예: 도입에서 전체에게 / 모둠 활동 중 순회하며 이 말을 한 학생에게 / 정리 단계 / 평가 후 재지도)에, 어떤 자료를 보여 주며 묻는지.
-   (아) 발문 트리: 교정 발문을 던진 뒤 학생이 보일 예상 반응 3갈래 — kind는 "이해" / "부분 이해" / "오개념 유지" — 각각 학생이 실제로 할 법한 말 1문장과, 그 반응에 교사가 이어서 던질 다음 발문 1문장. "이해"에는 확장·적용 질문을, "부분 이해"에는 빠진 속성을 짚는 질문을, "오개념 유지"에는 더 강한 반례나 더 구체적인 상황을 주는 질문을. (자) 판단 기준: 어떤 말이 나오면 이 오개념을 벗어난 것으로 볼지 1문장.
-   - 세 오개념의 근거는 서로 다른 구절이나 다른 관점을 짚어야 한다. 같은 구절을 세 번 반복 인용하지 말 것. 성취수준 서술이 짧아 근거가 부족하면 성취기준 문장의 핵심 동사와 핵심아이디어에서 근거를 찾는다.
-   - 반례 제시형: 오개념에 어긋나는 사례를 보여 주고 묻는다. 과잉일반화에 특히 맞는다.
-   - 모순 유도형: 학생의 말대로라면 생기는 모순을 스스로 발견하게 묻는다. 선개념에 특히 맞는다.
-   - 근거 요구형: "왜 그렇게 생각했는지"를 묻고 근거를 점검하게 한다. 용어 혼동·과소일반화에 맞는다.
-3. 이 발문 카드를 수업에서 쓰는 방법 3문장: ① 도입 차시 첫 5분에 진단 질문으로 학생 생각을 드러내는 법, ② 활동 중 순회하며 오개념이 들리는 순간 교정 발문을 던지는 법, ③ 정리·평가 후 확인 질문으로 재지도하는 법. 이 성취기준의 실제 활동에 맞게 구체적으로.
-
+과제: 여러 차시에서 쓸 오개념·발문 지도 초안.
+0. approach: 귀납 / 연역 후 범례 / 먼저 씨름 후 설명 중 출발 방식을 제안하고, 목표·사전지식·사례의 구별 가능성·가용시간에 근거한 조건을 명시한다. 사전지식이 없으면 추정이라고 밝힌다. 자료 제공 자체를 연역이라고 부르지 않는다. 먼저 씨름 후 설명은 비교 가능한 시도와 이를 연결하는 후속 설명을 포함한다.
+1. concept: 학생 언어·교과 정의와 핵심아이디어 연결. 고등 등 자료가 없으면 연결을 꾸미지 말고 '앱에 해당 학교급 핵심아이디어 자료 없음'이라고 쓴다. 성취기준에 명시되지 않은 정의는 교과 지식에 기초한 검토용 초안이다.
+2. 서로 다른 예상 오개념을 최대 3개 만든다. 타당한 것이 적으면 개수를 채우지 않는다.
+- statement: 조건과 학생의 실제 발화를 구체화한다. 유형 type은 중복 가능하며 확정 진단 아님.
+- evidence_source: 성취기준 또는 성취수준 A/B/C/D/E 중 관련 원문이 있는 하나. evidence_quote: 그 원문에서 실제로 연속된 구절을 그대로 인용. 인용할 원문이 없으면 둘 다 빈 문자열. evidence: 인용과 구별되는 추론 및 대안 설명을 쓴다. 하위 서술에서 오개념을 필연적으로 도출하거나 낮은 성취를 오개념과 동일시하지 않는다. 같은 적절한 인용을 여러 가설에 쓸 수 있다. 출처·페이지를 만들지 않는다.
+- diagnostic_question: 교정 전에 학생이 무엇을 근거로 판단하는지 드러내는 질문.
+- correction_type: 반례 제시/대조/근거 요구/재표현/명시적 설명 등을 선택·조합.
+- material: 발문에 필요한 사례·수치·그림의 구체적 설명. correction_question: 그 자료로 묻는 간결한 질문.
+- responses: 이해/부분 이해/오개념 유지 3갈래. student_says는 실제 예상 말. next_question은 교사의 후속 발문 또는 행동. 이해에는 새로운 사례 적용, 부분 이해에는 빠진 속성, 유지에는 그림·조작·대조·짧은 설명 등 다른 지원. 무조건 더 강한 모순을 요구하지 않는다. 말이 없거나 이유를 모르면 원인 판단을 보류하고 선택지·표현 지원을 제공.
+- mastery: 같은 정답 반복이 아니라 다른 사례에서 핵심 조건과 이유를 말하는지를 판단.
+- follow_up: 앞에서 쓴 자료와 다른 새로운 사례에서 확인하는 질문.
+- scene: 쓸 장면. 수업 후 관찰 이전에 발생 빈도·효과를 확정하지 않는다.
+3. teaching_note: 진단→학생 근거에 맞춘 지원→새 사례 확인 방법을 3문장으로.
 JSON 형식:
-{"approach":{"mode":"귀납|연역 후 범례|먼저 씨름 후 설명","reason":""},
- "concept":{"name":"${state.concept}","student_definition":"","formal_definition":"","core_idea_link":""},
- "misconceptions":[{"statement":"","type":"","evidence":"","diagnostic_question":"","correction_type":"","correction_question":"","follow_up":"","scene":"","responses":[{"kind":"이해","student_says":"","next_question":""},{"kind":"부분 이해","student_says":"","next_question":""},{"kind":"오개념 유지","student_says":"","next_question":""}],"mastery":""}],
- "teaching_note":""}`;
+{"approach":{"mode":"","reason":""},"concept":{"name":"","student_definition":"","formal_definition":"","core_idea_link":""},
+"misconceptions":[{"statement":"","type":"","evidence_source":"","evidence_quote":"","evidence":"","material":"","diagnostic_question":"","correction_type":"","correction_question":"","responses":[{"kind":"이해","student_says":"","next_question":""},{"kind":"부분 이해","student_says":"","next_question":""},{"kind":"오개념 유지","student_says":"","next_question":""}],"mastery":"","follow_up":"","scene":""}],"teaching_note":""}`;
 }
 
 function promptLesson() {
@@ -324,11 +345,11 @@ ${curriculumBlock()}
 ${mis}
 
 ${state.lessonMode === 'deductive'
-  ? `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "연역 안내 후 범례 확인" 방식으로 설계하라. 교사가 정의·약속·핵심 자료를 짧고 분명하게 안내한 뒤(학생 말로 번역해 주기), 학생은 여러 예시와 가까운 비예시에 그 정의를 적용해 판단하고, 판단이 갈리는 사례에서 속성을 다시 확인하며, 마지막에 자기 말로 정의를 다시 쓴다. 안내는 5분 안에 끝내고 나머지는 학생의 적용·판단 활동으로 채운다.`
-  : `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "귀납적 개념 획득" 방식으로 설계하라. 학생은 예시와 비예시를 먼저 보고, 공통 특징을 스스로 찾고, 자기 말로 정의를 만든 뒤, 마지막에 교과 정의와 맞춘다. 정의를 먼저 알려주지 않는다.`}
+  ? `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "연역 안내 후 범례 확인" 방식으로 설계하라. 교사가 정의·약속·핵심 자료를 짧고 분명하게 안내한 뒤(학생 말로 번역해 주기), 학생은 여러 예시와 가까운 비예시에 그 정의를 적용해 판단하고, 판단이 갈리는 사례에서 속성을 다시 확인하며, 마지막에 자기 말로 정의를 다시 쓴다. 안내 길이는 학생 사전지식과 개념 복잡성에 맞추고 나머지는 학생의 적용·판단 활동으로 채운다.`
+  : `과제: 이 개념을 처음 도입하는 ${lv.minutes}분 차시를 "귀납적 개념 획득" 방식으로 설계하라. 학생은 예시와 비예시를 먼저 보고, 공통 특징을 스스로 찾고, 자기 말로 정의를 만든 뒤, 마지막에 교과 정의와 맞춘다. 필요한 자료·비교 기준·발문을 제공한다. 용어·약속은 필요한 시점에 안내하고, 핵심 속성을 탐색한 뒤 정의를 정리한다.`}
 1. 예시 5개: 학생에게 친숙하고 개념의 필수 속성이 잘 드러나는 것. 각각 왜 예시인지 한 구절.
 2. 비예시 5개: "가까운 비예시" 위주 — 위에 예측한 오개념을 가진 학생이 예시라고 착각할 만한 것. 각각 어떤 속성이 빠져서 비예시인지 한 구절.
-3. 학생이 발견해야 할 필수 속성 3~4개와, 각각을 끌어내는 교사 질문 1문장.
+3. 학생이 발견해야 할 필수 속성(필요한 수만, 개수를 억지로 채우지 않기)와, 각각을 끌어내는 교사 질문 1문장.
 4. 학생이 만들 법한 정의(예상)와 교과 정의.
 5. ${lv.minutes}분 흐름 5~6단계: 단계명, 분, 교사가 하는 일, 학생이 하는 일, 준비물. 합계가 ${lv.minutes}분이 되게.
 6. 차시 끝 이해 확인 질문 1개(새로운 사례를 판단하게 하는 질문).
@@ -342,10 +363,23 @@ JSON 형식:
 }
 
 /* ---------- 액션 ---------- */
+let aiBusy = false;
+function setBusy(on) {
+  aiBusy = on;
+  $$('.rail input, .rail select, .rail textarea, .rail button, .result-toolbar button, .regen, #btnSaved, #btnSettings').forEach(el => { el.disabled = on; });
+  $('#btnPresent').disabled = on || !state.lesson;
+}
+function validateMap(map) {
+  if (!map || typeof map !== 'object' || !map.concept || typeof map.concept !== 'object' || !Array.isArray(map.misconceptions) || !map.misconceptions.length || map.misconceptions.some(m => !m || typeof m !== 'object' || !Array.isArray(m.responses) || m.responses.some(r => !r || typeof r !== 'object'))) {
+    throw new Error('지도 형식이 올바르지 않습니다. 현재 초안은 유지됩니다.');
+  }
+  return map;
+}
 async function suggestConcepts() {
+  if (aiBusy) return;
   if (!state.std) { setStatus('먼저 성취기준을 고르세요.', 'err'); return; }
   setStatus('개념 후보를 찾는 중', 'busy');
-  $('#btnSuggest').disabled = true;
+  setBusy(true);
   try {
     const j = await callGemini(promptSuggest());
     const box = $('#conceptChips'); box.innerHTML = '';
@@ -365,42 +399,50 @@ async function suggestConcepts() {
     }
     setStatus('후보를 고르거나 직접 입력하세요.');
   } catch (e) { setStatus(e.message, 'err'); }
-  finally { $('#btnSuggest').disabled = false; }
+  finally { setBusy(false); }
 }
 
 async function generateMap() {
+  if (aiBusy) return;
   if (!state.std) { setStatus('먼저 성취기준을 고르세요.', 'err'); return; }
   state.concept = $('#inpConcept').value.trim();
   state.context = $('#inpContext').value;
   if (!state.concept) { setStatus('개념을 입력하거나 후보에서 고르세요.', 'err'); $('#inpConcept').focus(); return; }
-  setStatus('오개념·발문 지도를 만드는 중 (20초 안팎)', 'busy');
-  $('#btnGenerate').disabled = true;
+  setStatus('초안을 만드는 중… 응답 시간은 모델·연결 상태에 따라 달라집니다.', 'busy');
+  setBusy(true);
   try {
-    state.map = await callGemini(promptMap());
+    const next = validateMap(await callGemini(promptMap()));
+    state.map = next;
+    state.originalMap = structuredClone(next); state.focusCard = 0;
+    state.cardReviews = {};
     state.lesson = null; $('#blkLesson').classList.add('hidden'); $('#btnPresent').disabled = true;
-    state.review = { checks: [false,false,false,false], edits: '' };
+    state.review = { checks: [false,false,false,false], edits: '', plan: '' };
     renderMap();
     $('#result').classList.remove('hidden');
     $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setStatus('완성. 본문을 눌러 바로 고칠 수 있습니다.');
+    setStatus('AI 초안입니다. 카드 하나를 골라 인용·가설·발문을 검토하고 수정 이유를 기록하세요.');
   } catch (e) { setStatus(e.message, 'err'); }
-  finally { $('#btnGenerate').disabled = false; }
+  finally { setBusy(false); }
 }
 
 async function generateLesson(mode) {
+  if (aiBusy) return;
   if (!state.map) return;
+  const previousMode = state.lessonMode;
   if (mode) state.lessonMode = mode;
-  setStatus('차시안을 만드는 중 (20초 안팎)', 'busy');
-  $('#btnLesson').disabled = true; $('#btnLessonDed').disabled = true;
+  setStatus('차시안을 만드는 중… 응답 시간은 모델·연결 상태에 따라 달라집니다.', 'busy');
+  setBusy(true);
   try {
-    state.lesson = await callGemini(promptLesson());
+    const next = await callGemini(promptLesson());
+    if (!next || !['examples','nonexamples','attributes','flow'].every(k => Array.isArray(next[k]) && next[k].every(x => x && typeof x === 'object'))) throw new Error('차시안 형식이 올바르지 않습니다. 현재 초안은 유지됩니다.');
+    state.lesson = next;
     renderLesson();
     $('#blkLesson').classList.remove('hidden');
     $('#btnPresent').disabled = false;
     $('#blkLesson').scrollIntoView({ behavior: 'smooth', block: 'start' });
     setStatus('차시안 완성.');
-  } catch (e) { setStatus(e.message, 'err'); }
-  finally { $('#btnLesson').disabled = false; $('#btnLessonDed').disabled = false; }
+  } catch (e) { state.lessonMode = previousMode; setStatus(e.message, 'err'); }
+  finally { setBusy(false); }
 }
 
 /* ---------- 렌더 & 양방향 바인딩 ---------- */
@@ -416,27 +458,66 @@ function bindAll(root = document) {
     el.textContent = v == null ? '' : String(v);
     if (!el.dataset.bound) {
       el.dataset.bound = '1';
-      el.addEventListener('input', () => setPath(state, el.dataset.bind, el.textContent));
+      el.addEventListener('input', () => {
+        setPath(state, el.dataset.bind, el.textContent);
+        updateReviewStatus();
+        if (/\.evidence_(source|quote)$/.test(el.dataset.bind)) updateEvidenceChecks();
+      });
     }
   });
 }
 function ed(path, cls = '') { return `<span class="editable ${cls}" contenteditable="true" data-bind="${path}"></span>`; }
 
 function branchClass(k) { return k === '이해' ? 'ok' : (k === '부분 이해' ? 'part' : 'hold'); }
+function evidenceCheck(mis) {
+  const src = mis.evidence_source || '', quote = (mis.evidence_quote || '').trim();
+  const key = src.match(/^성취수준 ([ABCDE])$/)?.[1];
+  const source = src === '성취기준' ? state.std?.t : key ? state.std?.[key] : '';
+  if (!quote) return '원문 인용 없음 · 가설의 근거를 교사가 확인하세요.';
+  if (!source || !source.includes(quote)) return '인용 불일치 · 출처와 인용문을 수정하세요.';
+  return '탑재 원문과 문구 일치 · 오개념의 발생·원인이나 공식 원문 대조까지 검증한 것은 아닙니다.';
+}
+function updateEvidenceChecks() {
+  $$('#misCards [data-evidence-check]').forEach(el => { el.textContent = evidenceCheck(state.map.misconceptions[+el.dataset.evidenceCheck]); });
+}
+function changedFieldCount(before, after) {
+  if (!before || !after) return 0;
+  let n = 0;
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (['status','note'].includes(key)) continue;
+    const a = before[key], b = after[key];
+    if (a && b && typeof a === 'object' && typeof b === 'object') n += changedFieldCount(a, b);
+    else if (String(a ?? '').trim() !== String(b ?? '').trim()) n++;
+  }
+  return n;
+}
+function reviewSummary() {
+  const i = state.focusCard || 0;
+  const changed = changedFieldCount(state.originalMap?.misconceptions?.[i], state.map?.misconceptions?.[i]);
+  const checks = (state.review.checks || []).filter(Boolean).length;
+  return `선택 카드 ${i + 1} · 검토 ${checks}/4 · 초안 대비 수정 ${changed}곳 · ${state.review.edits?.trim() ? '판단 이유 기록됨' : '수정/유지/보류 이유를 기록하세요'} · ${state.review.plan?.trim() ? '적용 계획 기록됨' : '적용 계획 미작성'}`;
+}
+function updateReviewStatus() {
+  $('#reviewStatus').textContent = reviewSummary();
+}
 function renderMap() {
   const m = state.map;
   $('#resTitle').textContent = `${state.concept} — ${state.std.c}`;
+  $('#printCardTitle').textContent = `${state.std.g} ${state.std.sub} · ${state.std.c} · ${state.concept} — 검토용 발문 카드`;
   const box = $('#misCards'); box.innerHTML = '';
   (m.misconceptions || []).forEach((mis, i) => {
     const p = `map.misconceptions.${i}`;
     const card = document.createElement('article'); card.className = 'mis';
+    card.classList.toggle('focus-card', i === state.focusCard);
     card.innerHTML = `
       <div class="mis-student">
+        <label class="focus-choice"><input type="radio" name="focusCard" value="${i}" ${i === state.focusCard ? 'checked' : ''}> 이 카드 집중 검토·인쇄</label>
         <span class="mis-tag">${ed(p + '.type')}</span>
         <div class="mis-statement editable" contenteditable="true" data-bind="${p}.statement"></div>
-        <div class="mis-evidence"><b>근거</b> ${ed(p + '.evidence')}</div>
+        <div class="mis-evidence"><b>원문 출처</b> ${ed(p + '.evidence_source')}<br><b>원문 인용</b> ${ed(p + '.evidence_quote')}<p class="evidence-check" data-evidence-check="${i}"></p><b>예상 가설·대안 설명</b> ${ed(p + '.evidence')}</div>
       </div>
       <div class="mis-teacher">
+        <div class="mis-small"><b>보여 줄 자료·조건</b> ${ed(p + '.material')}</div>
         <div class="mis-row"><span class="mis-tag">진단 질문</span><div class="mis-small">${ed(p + '.diagnostic_question', 'serif')}</div></div>
         <div class="mis-row"><span class="mis-tag">${ed(p + '.correction_type')}</span>
           <div class="mis-q editable" contenteditable="true" data-bind="${p}.correction_question"></div></div>
@@ -447,7 +528,7 @@ function renderMap() {
             <div class="branch-says editable" contenteditable="true" data-bind="${p}.responses.${k}.student_says"></div>
             <div class="branch-next"><span class="arrow">↳</span><div class="editable serif" contenteditable="true" data-bind="${p}.responses.${k}.next_question"></div></div>
           </div>`).join('')}
-          <div class="mis-small"><b>벗어났다고 보는 기준</b> ${ed(p + '.mastery')}</div>
+          <div class="mis-small"><b>새 사례에서 확인할 기준</b> ${ed(p + '.mastery')}</div>
         </div>
         <div class="mis-small"><b>확인</b> ${ed(p + '.follow_up')}</div>
         <div class="mis-scene"><b>쓰는 장면</b> ${ed(p + '.scene')}</div>
@@ -456,7 +537,8 @@ function renderMap() {
             <select data-status="${i}">
               <option value="">아직 수업 전</option>
               <option value="seen">실제로 나왔다</option>
-              <option value="unseen">나오지 않았다</option>
+              <option value="unseen">관찰하지 못했다 (없음 확정 아님)</option>
+              <option value="unassessed">확인할 기회가 없었다</option>
               <option value="other">다른 오개념이 나왔다</option>
             </select></div>
           <div class="row" style="align-items:flex-start"><span>메모</span>${ed(p + '.note')}</div>
@@ -466,11 +548,21 @@ function renderMap() {
     sel.value = mis.status || '';
     card.classList.toggle('seen', sel.value === 'seen');
     sel.addEventListener('change', () => { mis.status = sel.value; card.classList.toggle('seen', sel.value === 'seen'); });
+    card.querySelector('input[name=focusCard]').addEventListener('change', () => {
+      state.cardReviews[state.focusCard] = structuredClone(state.review);
+      state.focusCard = i;
+      state.review = state.cardReviews[i] || { checks: [false,false,false,false], edits: '', plan: '' };
+      $$('#misCards .mis').forEach((c, n) => c.classList.toggle('focus-card', n === i));
+      $$('#blkReview input[type=checkbox]').forEach(cb => { cb.checked = !!state.review.checks[+cb.dataset.review]; });
+      bindAll($('#blkReview'));
+      updateReviewStatus();
+    });
     box.appendChild(card);
   });
   // 검토 체크
   $$('#blkReview input[type=checkbox]').forEach(cb => { cb.checked = !!state.review.checks[+cb.dataset.review]; });
   bindAll();
+  updateEvidenceChecks(); updateReviewStatus();
 }
 
 function renderLesson() {
@@ -478,7 +570,7 @@ function renderLesson() {
   const lv = levelOf(state.std.g);
   $('#lessonMin').textContent = `(${lv.minutes}분 기준 · ${state.lessonMode === 'deductive' ? '연역 안내 후 범례 확인' : '귀납적 개념 획득'})`;
   $('#blkLesson h3').textContent = state.lessonMode === 'deductive' ? '연역 안내 후 범례 확인 차시안' : '귀납적 개념 획득 차시안';
-  $('.lesson-lead').textContent = state.lessonMode === 'deductive' ? '정의·약속을 짧게 안내한 뒤 → 여러 예시와 가까운 비예시에 적용해 판단하고 → 갈리는 사례에서 속성을 확인한 뒤 → 자기 말로 정의를 다시 씁니다.' : '예시와 비예시를 먼저 보고 → 공통 특징을 찾고 → 학생 말로 정의를 만든 뒤 → 교과 정의와 맞춥니다. 정의는 맨 마지막에 나옵니다.';
+  $('.lesson-lead').textContent = state.lessonMode === 'deductive' ? '정의·약속을 짧게 안내한 뒤 → 여러 예시와 가까운 비예시에 적용해 판단하고 → 갈리는 사례에서 속성을 확인한 뒤 → 자기 말로 정의를 다시 씁니다.' : '예시와 비예시를 먼저 보고 → 공통 특징을 찾고 → 학생 말로 정의를 만든 뒤 → 교과 정의와 맞춥니다. 필요한 안내를 제공하며, 탐색 뒤 정의를 정리합니다.';
   const li = (arr, path) => arr.map((_, i) => `<li><div class="item editable" contenteditable="true" data-bind="${path}.${i}.item"></div><div class="why editable" contenteditable="true" data-bind="${path}.${i}.note"></div></li>`).join('');
   $('#exList').innerHTML = li(L.examples || [], 'lesson.examples');
   $('#nonList').innerHTML = li(L.nonexamples || [], 'lesson.nonexamples');
@@ -509,22 +601,30 @@ function toMarkdown() {
     out.push('', '## 예상 오개념과 교정 발문');
     (m.misconceptions || []).forEach((x, i) => {
       out.push(`### ${i + 1}. "${x.statement}" (${x.type})`);
-      out.push(`- 근거: ${x.evidence}`);
+      out.push(`- 원문 출처: ${x.evidence_source || '별도 확인 필요'}`);
+      out.push(`- 원문 인용: ${x.evidence_quote || '없음'}`);
+      out.push(`- 인용 대조: ${evidenceCheck(x)}`);
+      out.push(`- 예상 가설·대안 설명: ${x.evidence}`);
+      out.push(`- 자료·조건: ${x.material || ''}`);
       out.push(`- 진단 질문: ${x.diagnostic_question}`);
       out.push(`- 교정 발문 (${x.correction_type}): ${x.correction_question}`);
       (x.responses || []).forEach(r => out.push(`  - [${r.kind}] "${r.student_says}" → ${r.next_question}`));
       if (x.mastery) out.push(`- 벗어났다고 보는 기준: ${x.mastery}`);
       out.push(`- 확인: ${x.follow_up}`);
       if (x.scene) out.push(`- 쓰는 장면: ${x.scene}`);
-      if (x.status) out.push(`- 수업 뒤: ${({seen:'실제로 나왔다',unseen:'나오지 않았다',other:'다른 오개념이 나왔다'})[x.status] || ''}${x.note ? ' — ' + x.note : ''}`);
+      if (x.status || x.note) out.push(`- 수업 뒤: ${({seen:'실제로 나왔다',unseen:'관찰하지 못했다 (없음 확정 아님)',unassessed:'확인할 기회가 없었다',other:'다른 오개념이 나왔다'})[x.status] || '미기록'}${x.note ? ' — ' + x.note : ''}`);
     });
     out.push('', `수업에서 쓰는 방법: ${m.teaching_note || ''}`);
-    const labels = ['근거가 성취수준에서 왔는가','학생이 정말 이렇게 말하는가','발문 조건에 맞는가','유지 갈래가 첫 발문보다 강한가'];
+    const labels = ['원문 인용과 예상 가설을 구분했는가','학생의 말·조건·대안 원인을 확인했는가','발문이 한 판단과 이유를 드러내는가','유지 반응에 다른 지원과 새 사례 확인이 있는가'];
     out.push('', '## 검토', ...labels.map((l, i) => `- [${state.review.checks[i] ? 'x' : ' '}] ${l}`));
     if (state.review.edits) out.push(`- 고친 곳: ${state.review.edits}`);
+    out.push(`- 검토 상태: ${reviewSummary()}`, `- 다음 수업 적용: ${state.review.plan || '미작성'}`);
+    Object.entries(state.cardReviews || {}).forEach(([i, r]) => {
+      if (+i !== state.focusCard) out.push(`- 카드 ${+i + 1} 검토 기록: ${r.edits || '미작성'} / 적용 계획: ${r.plan || '미작성'}`);
+    });
   }
   if (L) {
-    out.push('', '## 귀납적 개념 획득 차시안');
+    out.push('', `## ${state.lessonMode === 'deductive' ? '연역 안내 후 범례 확인' : '귀납적 개념 획득'} 차시안`);
     out.push('### 예시'); (L.examples || []).forEach(e => out.push(`- ${e.item} — ${e.note}`));
     out.push('### 비예시'); (L.nonexamples || []).forEach(e => out.push(`- ${e.item} — ${e.note}`));
     out.push('### 특징과 질문'); (L.attributes || []).forEach(a => out.push(`- ${a.attribute}: ${a.eliciting_question}`));
@@ -541,18 +641,21 @@ async function copyText() {
 }
 
 /* ---------- 저장/불러오기 ---------- */
-function savedAll() { try { return JSON.parse(localStorage.getItem('chg:saved') || '[]'); } catch (_) { return []; } }
+function savedAll() { try { const list = JSON.parse(localStorage.getItem('chg:saved') || '[]'); return Array.isArray(list) ? list : []; } catch (_) { return []; } }
 function saveCurrent() {
   if (!state.map) return;
   const list = savedAll();
   const item = { id: Date.now(), title: `${state.concept} — ${state.std.c}`, ts: new Date().toISOString(),
-    data: { stdCode: state.std.c, stdGrade: state.std.g, coreSelected: state.coreSelected, concept: state.concept, context: state.context, map: state.map, lesson: state.lesson, lessonMode: state.lessonMode, review: state.review } };
+    data: { stdCode: state.std.c, stdGrade: state.std.g, coreSelected: state.coreSelected, concept: state.concept, context: state.context, map: state.map, lesson: state.lesson, lessonMode: state.lessonMode, review: state.review, originalMap: state.originalMap, focusCard: state.focusCard, cardReviews: state.cardReviews } };
   list.unshift(item);
-  localStorage.setItem('chg:saved', JSON.stringify(list.slice(0, 50)));
-  setStatus('이 브라우저에 저장했습니다.');
+  try {
+    localStorage.setItem('chg:saved', JSON.stringify(list.slice(0, 50)));
+    setStatus('이 브라우저에 저장했습니다. 저장 목록의 「파일」로 별도 보관할 수 있습니다.');
+  } catch (_) { setStatus('브라우저 저장 공간이 부족하거나 저장이 차단되었습니다. 텍스트 복사나 인쇄로 보관하세요.', 'err'); }
 }
 function loadItem(item) {
   const d = item.data;
+  validateMap(d?.map);
   const std = STD.find(x => x.c === d.stdCode && x.g === d.stdGrade) || STD.find(x => x.c === d.stdCode);
   if (!std) { setStatus('저장된 성취기준을 찾을 수 없습니다.', 'err'); return; }
   const lv = levelOf(std.g);
@@ -562,12 +665,15 @@ function loadItem(item) {
   $('#selCourse').value = std.sub; onCourseChange();
   $('#selArea').value = std.a || '(영역 없음)'; onAreaChange();
   $('#selStd').value = std.c; onStdPick();
-  state.coreSelected = d.coreSelected || [];
+  state.coreSelected = std.g === '고등학교' ? [] : (d.coreSelected || []);
   $$('#evCore input').forEach(cb => { const on = state.coreSelected.some(x => x.id === cb.dataset.id); cb.checked = on; cb.closest('label').classList.toggle('picked', on); });
   state.concept = d.concept; $('#inpConcept').value = d.concept;
   state.context = d.context || ''; $('#inpContext').value = state.context;
   state.map = d.map; state.lesson = d.lesson; state.lessonMode = d.lessonMode || 'inductive';
-  state.review = d.review || { checks: [false,false,false,false], edits: '' };
+  state.review = { checks: [false,false,false,false], edits: '', plan: '', ...(d.review || {}) };
+  state.originalMap = d.originalMap || structuredClone(d.map);
+  state.focusCard = Number.isInteger(d.focusCard) && d.focusCard >= 0 && d.focusCard < d.map.misconceptions.length ? d.focusCard : 0;
+  state.cardReviews = d.cardReviews || {};
   renderMap(); $('#result').classList.remove('hidden');
   if (state.lesson) { renderLesson(); $('#blkLesson').classList.remove('hidden'); $('#btnPresent').disabled = false; }
   else { $('#blkLesson').classList.add('hidden'); $('#btnPresent').disabled = true; }
@@ -616,6 +722,26 @@ function showPres() {
 function presNav(d) { pres.i = (pres.i + d + pres.items.length) % pres.items.length; pres.revealed = false; showPres(); }
 
 /* ---------- 초기화 ---------- */
+function openPractice(manual = false) {
+  if (manual && !state.std) { setStatus('먼저 성취기준을 고르세요.', 'err'); return; }
+  const p = manual ? null : PRACTICE[$('#selPractice').value];
+  const std = manual ? state.std : STD.find(s => s.c === p.code);
+  const concept = manual ? ($('#inpConcept').value.trim() || '핵심 개념을 입력하세요') : p.concept;
+  const blank = { statement:'', type:'판단 보류', evidence_source:'성취기준', evidence_quote:std.t, evidence:'원문에서 확인할 개념 요소와 예상 가설을 구별해 적으세요.', material:'', diagnostic_question:'', correction_type:'', correction_question:'', responses:['이해','부분 이해','오개념 유지'].map(kind => ({kind, student_says:'', next_question:''})), mastery:'', follow_up:'', scene:'' };
+  const map = {
+    approach: { mode: p?.mode || '교사 판단', reason: p?.reason || '목표·사전지식·자료·시간을 기준으로 판단하세요.' },
+    concept: {name:concept, student_definition:p?.student_definition || '', formal_definition:p?.formal_definition || '', core_idea_link:'이 카드에서는 핵심아이디어를 별도로 연결하지 않았습니다.'},
+    misconceptions: [p ? {...structuredClone(p), evidence_source:'성취기준', evidence_quote:std.t} : blank],
+    teaching_note: '먼저 판단 이유를 듣습니다. 확인된 이유에 맞춰 자료·발문·설명을 조정합니다. 새 사례의 응답을 기록하고, 관찰하지 못한 것을 오개념이 없다는 뜻으로 해석하지 않습니다.'
+  };
+  loadItem({data:{stdCode:std.c, stdGrade:std.g, concept, context:manual ? $('#inpContext').value : '', map, lesson:null, coreSelected:[]}});
+  setStatus(manual ? '직접 작성 카드입니다. 빈칸을 채우고 저장하세요.' : '미리 작성한 연습 카드입니다. 실제 학생 진단·AI 출력이 아닙니다. 수정·유지·보류의 이유를 남기세요.');
+}
+function printCard() {
+  document.body.classList.add('print-card');
+  window.print();
+}
+window.addEventListener('afterprint', () => document.body.classList.remove('print-card'));
 async function init() {
   setStatus('교육과정 자료를 불러오는 중', 'busy');
   const [a, b] = await Promise.all([fetch('data/standards.json').then(r => r.json()), fetch('data/core_ideas.json').then(r => r.json())]);
@@ -637,10 +763,13 @@ async function init() {
   $('#btnLessonDed').addEventListener('click', () => generateLesson('deductive'));
   $$('.regen').forEach(b => b.addEventListener('click', () => b.dataset.part === 'lesson' ? generateLesson(state.lessonMode) : generateMap()));
   $('#btnCopy').addEventListener('click', copyText);
-  $('#btnPrint').addEventListener('click', () => window.print());
+  $('#btnPrint').addEventListener('click', () => { document.body.classList.remove('print-card'); window.print(); });
+  $('#btnPrintCard').addEventListener('click', printCard);
+  $('#btnPractice').addEventListener('click', () => openPractice());
+  $('#btnManual').addEventListener('click', () => openPractice(true));
   $('#btnSave').addEventListener('click', saveCurrent);
 
-  $$('#blkReview input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { state.review.checks[+cb.dataset.review] = cb.checked; }));
+  $$('#blkReview input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { state.review.checks[+cb.dataset.review] = cb.checked; updateReviewStatus(); }));
   $('#btnHelp').addEventListener('click', () => $('#dlgHelp').showModal());
   $('#btnCloseHelp').addEventListener('click', () => $('#dlgHelp').close());
   // 설정
@@ -674,6 +803,6 @@ async function init() {
     else if (e.key === 'ArrowLeft') presNav(-1);
     else if (e.key === ' ') { e.preventDefault(); pres.revealed = !pres.revealed; showPres(); }
   });
-  if (!getKey()) setStatus('오른쪽 위 「API 키 설정」에서 Gemini 키를 먼저 넣어 주세요.');
+  if (!getKey()) setStatus('키 없이 연습·직접 작성이 가능합니다. AI 생성은 「API 키 설정」 후 이용하세요.');
 }
 init().catch(e => setStatus('자료를 불러오지 못했습니다: ' + e.message, 'err'));
